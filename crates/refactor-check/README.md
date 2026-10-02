@@ -27,15 +27,58 @@ cargo build --release
 ```bash
 ./target/release/refactor-check \
   --input example_input.txt \
-  --api-key $OPENROUTER_API_KEY
+  --primary-model "$MODEL_ID"
 ```
+
+Set `OPENROUTER_API_KEY` for the API backend, or supply `--api-key`.
+
+### Codex CLI backend
+
+With an installed, authenticated Codex CLI, no API key is needed:
+
+```bash
+codex login
+./target/release/refactor-check --input example_input.txt --llm-provider codex
+```
+
+Omitting `--primary-model` and `--codex-reasoning-effort` preserves your local
+Codex model/provider and reasoning configuration. To override them:
+
+```bash
+./target/release/refactor-check \
+  --input example_input.txt \
+  --llm-provider codex \
+  --primary-model "$CODEX_MODEL" \
+  --codex-reasoning-effort high
+```
+
+`--judge-model` overrides the judge and splitting-judge model; all other roles
+use the primary model. Each request starts a fresh `codex exec --ephemeral`
+session in a temporary directory, sends the role-tagged conversation through
+stdin, and reads only `--output-last-message`. Progress output is never treated
+as a model answer. The invocation selects read-only mode, disables shell and
+web search, omits project instructions, and asks for text-only inference.
+Other local Codex configuration, including configured MCP servers, remains
+inherited; this adapter is not a general-purpose isolation boundary.
+
+The per-request timeout defaults to 300 seconds and includes prompt delivery.
+Failed processes, missing/empty final responses, and timeouts are errors, not
+verification success. Timeout or cancellation terminates the direct CLI child;
+the adapter does not promise process-tree supervision of arbitrary descendants.
+`--codex-path` selects a different executable. API connection/key/service-tier
+and stream options apply only to the API backend; Z3 options apply to both.
+Codex model availability follows your configured provider and account.
+
+This backend uses Codex's supported
+[non-interactive interface](https://learn.chatgpt.com/docs/non-interactive-mode)
+and has been tested with Codex CLI 0.160.0. It does not extract or copy login tokens.
 
 ### Required
 
 | Flag | Description |
 |------|-------------|
 | `--input <path>` | Path to the refactoring description file |
-| `--api-key <key>` | LLM API key (or set `OPENROUTER_API_KEY`) |
+| `--primary-model <model>` | Primary model; required for the default API backend |
 
 ### Optional
 
@@ -44,18 +87,19 @@ cargo build --release
 | `--solver-path` | `z3` | Path to the SMT solver binary |
 | `--solver-args` | `-in` | Arguments passed to the solver |
 | `--solver-timeout-secs` | `60` | Max seconds per solver invocation |
-| `--api-model` | `openrouter/free` | Default LLM model |
-| `--splitter-model` | (same as api-model) | Model for code decomposition |
-| `--formalizer-model` | (same as api-model) | Model for SMT formula generation |
-| `--fixer-model` | (same as api-model) | Model for formula correction |
-| `--judge-model` | (same as api-model) | Model for result evaluation |
-| `--splitting-judge-model` | (same as judge-model) | Model for evaluating code decompositions |
+| `--llm-provider` | `api` | Inference backend: `api` or `codex` |
+| `--api-key` | `OPENROUTER_API_KEY` | API backend key |
+| `--judge-model` | primary model | Model for result and decomposition evaluation |
+| `--codex-path` | `codex` | Codex CLI executable |
+| `--codex-reasoning-effort` | local Codex config | Codex reasoning effort override |
+| `--codex-timeout-secs` | `300` | Wall-clock timeout for each Codex invocation |
 | `--api-base` | `https://openrouter.ai/api/v1` | API endpoint |
 | `--stream-timeout-ms` | `3000` | Per-chunk stream timeout |
 | `--max-stream-retries` | `5` | Retries on stream errors |
-| `--service-tier` | `priority` | API service tier (auto/default/flex/scale/priority) |
+| `--service-tier` | `auto` | API service tier (auto/default/flex/scale/priority) |
 
-Role-specific API keys can be set via env vars: `JUDGE_API_KEY`, `FORMALIZER_API_KEY`, `FIXER_API_KEY`, `SPLITTER_API_KEY`.
+The CLI uses one API key for all roles. Role-specific API credentials are available
+through the library configuration, not through Codex login-token extraction.
 
 ## Example input file
 

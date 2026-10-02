@@ -1,12 +1,13 @@
 use anyhow::Context;
 use std::sync::Arc;
 
-use refactor_check_core::config_update::AppConfig;
 use crate::error_gate::ErrorGate;
-use crate::llm::{Message, system_message, user_message};
 use crate::live_config::LiveConfig;
+use crate::llm::{system_message, user_message, Message};
 use crate::piece_manager::DefaultPieceManager;
+use crate::provider::DynLlmProvider;
 use crate::smt::SolverOutcome;
+use refactor_check_core::config_update::AppConfig;
 
 pub use crate::smt::DEFAULT_SOLVER_TIMEOUT_SECS;
 
@@ -15,18 +16,29 @@ pub async fn run(
     config: Arc<LiveConfig<AppConfig>>,
     error_gate: Option<Arc<ErrorGate>>,
 ) -> anyhow::Result<()> {
-    let input_content = std::fs::read_to_string(input_file)
-        .with_context(|| format!("Failed to read input file: {input_file}"))?;
-
     let mut llm = crate::llm::LlmClient::with_live_config(config.clone());
-    let mut solver = crate::smt::Z3Solver::with_live_config(config);
     if let Some(gate) = &error_gate {
         llm = llm.with_error_gate(gate.clone());
+    }
+    run_with_llm(input_file, config, &llm, error_gate).await
+}
+
+/// Run the unchanged verification pipeline with a caller-selected inference provider.
+pub async fn run_with_llm(
+    input_file: &str,
+    config: Arc<LiveConfig<AppConfig>>,
+    llm: &DynLlmProvider,
+    error_gate: Option<Arc<ErrorGate>>,
+) -> anyhow::Result<()> {
+    let input_content = std::fs::read_to_string(input_file)
+        .with_context(|| format!("Failed to read input file: {input_file}"))?;
+    let mut solver = crate::smt::Z3Solver::with_live_config(config);
+    if let Some(gate) = &error_gate {
         solver = solver.with_error_gate(gate.clone());
     }
     let pm = DefaultPieceManager::new();
 
-    let result = crate::machine::run(&input_content, &llm, &solver, &pm).await?;
+    let result = crate::machine::run(&input_content, llm, &solver, &pm).await?;
     println!(
         "=== Overall Equivalent ===\n{}\n",
         result.overall_equivalent
